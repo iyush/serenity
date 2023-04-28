@@ -448,6 +448,28 @@ Optional<Cpp::Preprocessor::Substitution> CppComprehensionEngine::find_preproces
     return {};
 }
 
+Optional<StringView const> CppComprehensionEngine::get_comment(StringView filename, GUI::TextPosition const& position)
+{
+    auto const* document_ptr = get_or_create_document_data(filename);
+    if (!document_ptr)
+        return {};
+
+    auto const& document = *document_ptr;
+    auto declaration = find_declaration_of(document, position);
+    if (declaration.is_null()) {
+        return {};
+    }
+
+    outln("declaration: {}", declaration->full_name());
+    auto comment = declaration->get_comment();
+
+    if (comment.is_null()) {
+        return {};
+    }
+
+    return comment->get_text();
+}
+
 struct TargetDeclaration {
     enum Type {
         Variable,
@@ -509,6 +531,7 @@ static Optional<TargetDeclaration> get_target_declaration(ASTNode const& node, D
 
     return TargetDeclaration { TargetDeclaration::Type::Variable, name };
 }
+
 RefPtr<Cpp::Declaration const> CppComprehensionEngine::find_declaration_of(DocumentData const& document_data, ASTNode const& node) const
 {
     dbgln_if(CPP_LANGUAGE_SERVER_DEBUG, "find_declaration_of: {} ({})", document_data.parser().text_of_node(node), node.class_name());

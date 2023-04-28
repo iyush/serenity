@@ -27,36 +27,38 @@ Parser::Parser(Vector<Token> tokens, DeprecatedString const& filename)
     }
 }
 
-NonnullRefPtr<TranslationUnit> Parser::parse()
+NonnullRefPtr<TranslationUnit const> Parser::parse()
 {
     LOG_SCOPE();
     if (m_tokens.is_empty())
         return create_root_ast_node({}, {});
-    auto unit = create_root_ast_node(m_tokens.first().start(), m_tokens.last().end());
-    unit->set_declarations(parse_declarations_in_translation_unit(*unit));
-    return unit;
+    return parse_translation_unit();
 }
 
-Vector<NonnullRefPtr<Declaration const>> Parser::parse_declarations_in_translation_unit(ASTNode const& parent)
+NonnullRefPtr<TranslationUnit const> Parser::parse_translation_unit()
 {
-    Vector<NonnullRefPtr<Declaration const>> declarations;
+    auto unit = create_root_ast_node(m_tokens.first().start(), m_tokens.last().end());
     while (!eof()) {
-        auto declaration = parse_single_declaration_in_translation_unit(parent);
-        if (declaration) {
-            declarations.append(declaration.release_nonnull());
-        } else {
+        auto statement = parse_in_translation_unit(unit);
+        if (!statement.is_null() && statement->fast_is<Declaration>()) {
+            auto as_dec = adopt_ref(*dynamic_cast<Declaration const*>(statement.ptr()));
+            unit->append_declarations(as_dec);
+        }
+
+        if (statement.is_null()) {
             error("unexpected token"sv);
             consume();
         }
     }
-    return declarations;
+    return unit;
 }
 
-RefPtr<Declaration const> Parser::parse_single_declaration_in_translation_unit(ASTNode const& parent)
+RefPtr<Statement const> Parser::parse_in_translation_unit(ASTNode const& parent)
 {
+    RefPtr<Comment const> last_comment {};
     while (!eof()) {
         if (match_comment()) {
-            consume(Token::Type::Comment);
+            last_comment = parse_comment(parent);
             continue;
         }
 
@@ -65,41 +67,40 @@ RefPtr<Declaration const> Parser::parse_single_declaration_in_translation_unit(A
             continue;
         }
 
-        auto declaration = match_declaration_in_translation_unit();
-        if (declaration.has_value()) {
-            return parse_declaration(parent, declaration.value());
+        auto declaration_type = match_declaration_in_translation_unit();
+        if (declaration_type.has_value()) {
+            return parse_declaration(parent, declaration_type.value(), last_comment);
         }
-        return {};
     }
     return {};
 }
 
-NonnullRefPtr<Declaration const> Parser::parse_declaration(ASTNode const& parent, DeclarationType declaration_type)
+NonnullRefPtr<Declaration const> Parser::parse_declaration(ASTNode const& parent, DeclarationType declaration_type, RefPtr<Comment const> comment)
 {
     switch (declaration_type) {
     case DeclarationType::Function:
-        return parse_function_declaration(parent);
+        return parse_function_declaration(parent, comment);
     case DeclarationType::Variable:
-        return parse_variable_declaration(parent);
+        return parse_variable_declaration(parent, comment);
     case DeclarationType::Enum:
-        return parse_enum_declaration(parent);
+        return parse_enum_declaration(parent, comment);
     case DeclarationType::Class:
-        return parse_class_declaration(parent);
+        return parse_class_declaration(parent, comment);
     case DeclarationType::Namespace:
-        return parse_namespace_declaration(parent);
+        return parse_namespace_declaration(parent, comment);
     case DeclarationType::Constructor:
         return parse_constructor(parent);
     case DeclarationType::Destructor:
         return parse_destructor(parent);
     case DeclarationType::UsingNamespace:
-        return parse_using_namespace_declaration(parent);
+        return parse_using_namespace_declaration(parent, comment);
     default:
         error("unexpected declaration type"sv);
         return create_ast_node<InvalidDeclaration>(parent, position(), position());
     }
 }
 
-NonnullRefPtr<FunctionDeclaration const> Parser::parse_function_declaration(ASTNode const& parent)
+NonnullRefPtr<FunctionDeclaration const> Parser::parse_function_declaration(ASTNode const& parent, RefPtr<Comment const> comment)
 {
     auto func = create_ast_node<FunctionDeclaration>(parent, position(), {});
 
@@ -107,6 +108,7 @@ NonnullRefPtr<FunctionDeclaration const> Parser::parse_function_declaration(ASTN
     func->set_return_type(parse_type(*func));
 
     func->set_name(parse_name(*func));
+    func->set_comment(move(comment));
 
     consume(Token::Type::LeftParen);
     auto parameters = parse_parameter_list(*func);
@@ -142,8 +144,12 @@ NonnullRefPtr<FunctionDefinition const> Parser::parse_function_definition(ASTNod
     LOG_SCOPE();
     auto func = create_ast_node<FunctionDefinition>(parent, position(), {});
     consume(Token::Type::LeftCurly);
+    RefPtr<Comment const> last_comment = {};
     while (!eof() && peek().type() != Token::Type::RightCurly) {
-        func->add_statement(parse_statement(func));
+        if (match_comment()) {
+            last_comment = parse_comment(parent);
+        }
+        func->add_statement(parse_statement(func, last_comment));
     }
     func->set_end(position());
     if (!eof())
@@ -151,7 +157,7 @@ NonnullRefPtr<FunctionDefinition const> Parser::parse_function_definition(ASTNod
     return func;
 }
 
-NonnullRefPtr<Statement const> Parser::parse_statement(ASTNode const& parent)
+NonnullRefPtr<Statement const> Parser::parse_statement(ASTNode const& parent, RefPtr<Comment const> comment)
 {
     LOG_SCOPE();
     ArmedScopeGuard consume_semicolon([this]() {
@@ -162,12 +168,8 @@ NonnullRefPtr<Statement const> Parser::parse_statement(ASTNode const& parent)
         consume_semicolon.disarm();
         return parse_block_statement(parent);
     }
-    if (match_comment()) {
-        consume_semicolon.disarm();
-        return parse_comment(parent);
-    }
     if (match_variable_declaration()) {
-        return parse_variable_declaration(parent, false);
+        return parse_variable_declaration(parent, move(comment), false);
     }
     if (match_expression()) {
         return parse_expression(parent);
@@ -185,15 +187,16 @@ NonnullRefPtr<Statement const> Parser::parse_statement(ASTNode const& parent)
     } else {
         error("unexpected statement type"sv);
         consume_semicolon.disarm();
-        consume();
+        auto blah = consume();
+        dbgln("Unexpected statement text: {} type:{}", blah.text(), Token::type_to_string(blah.type()));
         return create_ast_node<InvalidStatement>(parent, position(), position());
     }
 }
 
 NonnullRefPtr<Comment const> Parser::parse_comment(ASTNode const& parent)
 {
-    auto comment = create_ast_node<Comment>(parent, position(), {});
-    consume(Token::Type::Comment);
+    auto token = consume(Token::Type::Comment);
+    auto comment = create_ast_node<Comment>(parent, position(), {}, token.text());
     comment->set_end(position());
     return comment;
 }
@@ -208,8 +211,15 @@ NonnullRefPtr<BlockStatement const> Parser::parse_block_statement(ASTNode const&
     LOG_SCOPE();
     auto block_statement = create_ast_node<BlockStatement>(parent, position(), {});
     consume(Token::Type::LeftCurly);
+
+    RefPtr<Comment const> last_comment;
     while (!eof() && peek().type() != Token::Type::RightCurly) {
-        block_statement->add_statement(parse_statement(*block_statement));
+        // if we have comment and a declaration right after that, we should store that comment
+        if (match_comment()) {
+            last_comment = parse_comment(parent);
+        }
+
+        block_statement->add_statement(parse_statement(*block_statement, last_comment));
     }
     consume(Token::Type::RightCurly);
     block_statement->set_end(position());
@@ -322,7 +332,7 @@ bool Parser::match_variable_declaration()
     return match(Token::Type::Semicolon);
 }
 
-NonnullRefPtr<VariableDeclaration const> Parser::parse_variable_declaration(ASTNode const& parent, bool expect_semicolon)
+NonnullRefPtr<VariableDeclaration const> Parser::parse_variable_declaration(ASTNode const& parent, RefPtr<Comment const> comment, bool expect_semicolon)
 {
     LOG_SCOPE();
     auto var = create_ast_node<VariableDeclaration>(parent, position(), {});
@@ -350,6 +360,7 @@ NonnullRefPtr<VariableDeclaration const> Parser::parse_variable_declaration(ASTN
     var->set_end(position());
     var->set_name(name);
     var->set_initial_value(move(initial_value));
+    var->set_comment(move(comment));
 
     return var;
 }
@@ -1088,7 +1099,7 @@ NonnullRefPtr<ReturnStatement const> Parser::parse_return_statement(ASTNode cons
     return return_statement;
 }
 
-NonnullRefPtr<EnumDeclaration const> Parser::parse_enum_declaration(ASTNode const& parent)
+NonnullRefPtr<EnumDeclaration const> Parser::parse_enum_declaration(ASTNode const& parent, RefPtr<Comment const> comment)
 {
     LOG_SCOPE();
     auto enum_decl = create_ast_node<EnumDeclaration>(parent, position(), {});
@@ -1120,6 +1131,7 @@ NonnullRefPtr<EnumDeclaration const> Parser::parse_enum_declaration(ASTNode cons
     consume(Token::Type::RightCurly);
     consume(Token::Type::Semicolon);
     enum_decl->set_end(position());
+    enum_decl->set_comment(move(comment));
     return enum_decl;
 }
 
@@ -1149,7 +1161,7 @@ bool Parser::match_keyword(DeprecatedString const& keyword)
     return true;
 }
 
-NonnullRefPtr<StructOrClassDeclaration const> Parser::parse_class_declaration(ASTNode const& parent)
+NonnullRefPtr<StructOrClassDeclaration const> Parser::parse_class_declaration(ASTNode const& parent, RefPtr<Comment const> comment)
 {
     LOG_SCOPE();
 
@@ -1196,6 +1208,7 @@ NonnullRefPtr<StructOrClassDeclaration const> Parser::parse_class_declaration(AS
     consume(Token::Type::RightCurly);
     consume(Token::Type::Semicolon);
     decl->set_end(position());
+    decl->set_comment(move(comment));
     return decl;
 }
 
@@ -1303,8 +1316,10 @@ NonnullRefPtr<ForStatement const> Parser::parse_for_statement(ASTNode const& par
     auto for_statement = create_ast_node<ForStatement>(parent, position(), {});
     consume(Token::Type::Keyword);
     consume(Token::Type::LeftParen);
-    if (peek().type() != Token::Type::Semicolon)
-        for_statement->set_init(parse_variable_declaration(*for_statement, false));
+    if (peek().type() != Token::Type::Semicolon) {
+        // no need to consider comments for var declarations for statement
+        for_statement->set_init(parse_variable_declaration(*for_statement, {}, false));
+    }
     consume(Token::Type::Semicolon);
 
     if (peek().type() != Token::Type::Semicolon)
@@ -1315,7 +1330,7 @@ NonnullRefPtr<ForStatement const> Parser::parse_for_statement(ASTNode const& par
         for_statement->set_update(parse_expression(*for_statement));
     consume(Token::Type::RightParen);
 
-    for_statement->set_body(parse_statement(*for_statement));
+    for_statement->set_body(parse_statement(*for_statement, {}));
 
     for_statement->set_end(for_statement->body()->end());
     return for_statement;
@@ -1329,10 +1344,10 @@ NonnullRefPtr<IfStatement const> Parser::parse_if_statement(ASTNode const& paren
     consume(Token::Type::LeftParen);
     if_statement->set_predicate(parse_expression(*if_statement));
     consume(Token::Type::RightParen);
-    if_statement->set_then_statement(parse_statement(*if_statement));
+    if_statement->set_then_statement(parse_statement(*if_statement, {}));
     if (match_keyword("else")) {
         consume(Token::Type::Keyword);
-        if_statement->set_else_statement(parse_statement(*if_statement));
+        if_statement->set_else_statement(parse_statement(*if_statement, {}));
         if_statement->set_end(if_statement->else_statement()->end());
     } else {
         if_statement->set_end(if_statement->then_statement()->end());
@@ -1406,7 +1421,7 @@ bool Parser::match_ellipsis()
     return peek().type() == Token::Type::Dot && peek(1).type() == Token::Type::Dot && peek(2).type() == Token::Type::Dot;
 }
 
-NonnullRefPtr<NamespaceDeclaration const> Parser::parse_namespace_declaration(ASTNode const& parent, bool is_nested_namespace)
+NonnullRefPtr<NamespaceDeclaration const> Parser::parse_namespace_declaration(ASTNode const& parent, RefPtr<Comment const> comment, bool is_nested_namespace)
 {
     auto namespace_decl = create_ast_node<NamespaceDeclaration>(parent, position(), {});
 
@@ -1418,22 +1433,24 @@ NonnullRefPtr<NamespaceDeclaration const> Parser::parse_namespace_declaration(AS
 
     if (peek().type() == Token::Type::ColonColon) {
         consume(Token::Type::ColonColon);
-        namespace_decl->add_declaration(parse_namespace_declaration(*namespace_decl, true));
+        namespace_decl->add_declaration(parse_namespace_declaration(*namespace_decl, comment, true));
         namespace_decl->set_end(position());
         return namespace_decl;
     }
 
     consume(Token::Type::LeftCurly);
     while (!eof() && peek().type() != Token::Type::RightCurly) {
-        auto declaration = parse_single_declaration_in_translation_unit(*namespace_decl);
-        if (declaration) {
-            namespace_decl->add_declaration(declaration.release_nonnull());
+        auto statement = parse_in_translation_unit(*namespace_decl);
+        if (statement && statement->fast_is<Declaration>()) {
+            auto as_dec = adopt_ref(*dynamic_cast<Declaration const*>(statement.ptr()));
+            namespace_decl->add_declaration(move(as_dec));
         } else {
             error("unexpected token"sv);
             consume();
         }
     }
     consume(Token::Type::RightCurly);
+    namespace_decl->set_comment(move(comment));
     namespace_decl->set_end(position());
     return namespace_decl;
 }
@@ -1617,7 +1634,7 @@ Vector<NonnullRefPtr<Declaration const>> Parser::parse_class_members(StructOrCla
             consume_access_specifier(); // FIXME: Do not ignore access specifiers
         auto member_type = match_class_member(class_name);
         if (member_type.has_value()) {
-            members.append(parse_declaration(parent, member_type.value()));
+            members.append(parse_declaration(parent, member_type.value(), {}));
         } else {
             error("Expected class member"sv);
             consume();
@@ -1761,7 +1778,7 @@ bool Parser::match_using_namespace_declaration()
     return true;
 }
 
-NonnullRefPtr<UsingNamespaceDeclaration const> Parser::parse_using_namespace_declaration(ASTNode const& parent)
+NonnullRefPtr<UsingNamespaceDeclaration const> Parser::parse_using_namespace_declaration(ASTNode const& parent, RefPtr<Comment const> comment)
 {
     auto decl = create_ast_node<UsingNamespaceDeclaration>(parent, position(), {});
 
@@ -1774,8 +1791,8 @@ NonnullRefPtr<UsingNamespaceDeclaration const> Parser::parse_using_namespace_dec
     consume(Token::Type::Semicolon);
 
     decl->set_name(name);
+    decl->set_comment(move(comment));
 
     return decl;
 }
-
 }

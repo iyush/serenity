@@ -178,6 +178,12 @@ void VariableDeclaration::dump(FILE* output, size_t indent) const
         m_type->dump(output, indent + 1);
     print_indent(output, indent + 1);
     outln(output, "{}", full_name());
+    print_indent(output, indent + 1);
+    out(output, "Comment ");
+    if (get_comment()) {
+        out(output, "{}", get_comment()->get_text());
+    }
+    outln(output, "");
     if (m_initial_value)
         m_initial_value->dump(output, indent + 1);
 }
@@ -344,6 +350,11 @@ void StructOrClassDeclaration::dump(FILE* output, size_t indent) const
                 outln(output, ",");
             }
         }
+    }
+    outln(output, "");
+    out(output, "Comment ");
+    if (get_comment()) {
+        out(output, "{}", get_comment()->get_text());
     }
     outln(output, "");
     for (auto& member : m_members) {

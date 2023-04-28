@@ -93,7 +93,7 @@ public:
     {
     }
 
-    void set_declarations(Vector<NonnullRefPtr<Declaration const>>&& declarations) { m_declarations = move(declarations); }
+    void append_declarations(NonnullRefPtr<Declaration const>& declaration) { m_declarations.append(declaration); }
 
 private:
     Vector<NonnullRefPtr<Declaration const>> m_declarations;
@@ -113,6 +113,22 @@ protected:
     }
 };
 
+class Comment final : public Statement {
+public:
+    Comment(ASTNode const* parent, Optional<Position> start, Optional<Position> end, DeprecatedString const& filename, StringView text)
+        : Statement(parent, start, end, filename)
+        , m_text(text)
+    {
+    }
+
+    virtual ~Comment() override = default;
+    virtual StringView class_name() const override { return "Comment"sv; }
+    StringView get_text() const { return m_text; }
+
+private:
+    StringView m_text;
+};
+
 class Declaration : public Statement {
 
 public:
@@ -129,6 +145,8 @@ public:
     Name const* name() const { return m_name; }
     StringView full_name() const;
     void set_name(RefPtr<Name const> name) { m_name = move(name); }
+    void set_comment(RefPtr<Comment const> comment) { m_comment = move(comment); }
+    RefPtr<Comment const> get_comment() const { return m_comment; }
 
 protected:
     Declaration(ASTNode const* parent, Optional<Position> start, Optional<Position> end, DeprecatedString const& filename)
@@ -137,6 +155,7 @@ protected:
     }
 
     RefPtr<Name const> m_name;
+    RefPtr<Comment const> m_comment;
     mutable Optional<DeprecatedString> m_full_name;
 };
 
@@ -823,21 +842,10 @@ public:
 
     virtual Vector<NonnullRefPtr<Declaration const>> declarations() const override;
 
-    void add_statement(NonnullRefPtr<Statement const>&& statement) { m_statements.append(move(statement)); }
+    void add_statement(NonnullRefPtr<Statement const>&& statement) { m_statements.append(statement); }
 
 private:
     Vector<NonnullRefPtr<Statement const>> m_statements;
-};
-
-class Comment final : public Statement {
-public:
-    Comment(ASTNode const* parent, Optional<Position> start, Optional<Position> end, DeprecatedString const& filename)
-        : Statement(parent, start, end, filename)
-    {
-    }
-
-    virtual ~Comment() override = default;
-    virtual StringView class_name() const override { return "Comment"sv; }
 };
 
 class IfStatement : public Statement {

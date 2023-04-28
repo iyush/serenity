@@ -31,6 +31,7 @@ public:
     virtual Optional<CodeComprehension::ProjectLocation> find_declaration_of(DeprecatedString const& filename, GUI::TextPosition const& identifier_position) override;
     virtual Optional<FunctionParamsHint> get_function_params_hint(DeprecatedString const&, GUI::TextPosition const&) override;
     virtual Vector<CodeComprehension::TokenInfo> get_tokens_info(DeprecatedString const& filename) override;
+    Optional<StringView const> get_comment(StringView filename, GUI::TextPosition const& position);
 
 private:
     struct SymbolName {
@@ -128,6 +129,7 @@ private:
 
     Optional<CodeComprehension::ProjectLocation> find_preprocessor_definition(DocumentData const&, const GUI::TextPosition&);
     Optional<Cpp::Preprocessor::Substitution> find_preprocessor_substitution(DocumentData const&, Cpp::Position const&);
+
 
     OwnPtr<DocumentData> create_document_data(DeprecatedString text, DeprecatedString const& filename);
     Optional<Vector<CodeComprehension::AutocompleteResultEntry>> try_autocomplete_property(DocumentData const&, ASTNode const&, Optional<Token> containing_token) const;

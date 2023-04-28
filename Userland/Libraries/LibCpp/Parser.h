@@ -22,7 +22,7 @@ public:
     explicit Parser(Vector<Token> tokens, DeprecatedString const& filename);
     ~Parser() = default;
 
-    NonnullRefPtr<TranslationUnit> parse();
+    NonnullRefPtr<TranslationUnit const> parse();
     bool eof() const;
 
     RefPtr<ASTNode const> node_at(Position) const;
@@ -87,18 +87,19 @@ private:
     Optional<Token> consume_whitespace();
     void consume_preprocessor();
 
-    NonnullRefPtr<Declaration const> parse_declaration(ASTNode const& parent, DeclarationType);
-    NonnullRefPtr<FunctionDeclaration const> parse_function_declaration(ASTNode const& parent);
+    NonnullRefPtr<TranslationUnit const> parse_translation_unit();
+    NonnullRefPtr<Declaration const> parse_declaration(ASTNode const& parent, DeclarationType, RefPtr<Comment const>);
+    NonnullRefPtr<FunctionDeclaration const> parse_function_declaration(ASTNode const& parent, RefPtr<Comment const>);
     NonnullRefPtr<FunctionDefinition const> parse_function_definition(ASTNode const& parent);
-    NonnullRefPtr<Statement const> parse_statement(ASTNode const& parent);
-    NonnullRefPtr<VariableDeclaration const> parse_variable_declaration(ASTNode const& parent, bool expect_semicolon = true);
+    NonnullRefPtr<Statement const> parse_statement(ASTNode const& parent, RefPtr<Comment const> comment);
+    NonnullRefPtr<VariableDeclaration const> parse_variable_declaration(ASTNode const& parent, RefPtr<Comment const>, bool expect_semicolon = true);
     NonnullRefPtr<Expression const> parse_expression(ASTNode const& parent);
     NonnullRefPtr<Expression const> parse_primary_expression(ASTNode const& parent);
     NonnullRefPtr<Expression const> parse_secondary_expression(ASTNode const& parent, NonnullRefPtr<Expression const> lhs);
     NonnullRefPtr<StringLiteral const> parse_string_literal(ASTNode const& parent);
     NonnullRefPtr<ReturnStatement const> parse_return_statement(ASTNode const& parent);
-    NonnullRefPtr<EnumDeclaration const> parse_enum_declaration(ASTNode const& parent);
-    NonnullRefPtr<StructOrClassDeclaration const> parse_class_declaration(ASTNode const& parent);
+    NonnullRefPtr<EnumDeclaration const> parse_enum_declaration(ASTNode const& parent, RefPtr<Comment const>);
+    NonnullRefPtr<StructOrClassDeclaration const> parse_class_declaration(ASTNode const& parent, RefPtr<Comment const>);
     NonnullRefPtr<Expression const> parse_literal(ASTNode const& parent);
     NonnullRefPtr<UnaryExpression const> parse_unary_expression(ASTNode const& parent);
     NonnullRefPtr<BooleanLiteral const> parse_boolean_literal(ASTNode const& parent);
@@ -109,9 +110,9 @@ private:
     NonnullRefPtr<BlockStatement const> parse_block_statement(ASTNode const& parent);
     NonnullRefPtr<Comment const> parse_comment(ASTNode const& parent);
     NonnullRefPtr<IfStatement const> parse_if_statement(ASTNode const& parent);
-    NonnullRefPtr<NamespaceDeclaration const> parse_namespace_declaration(ASTNode const& parent, bool is_nested_namespace = false);
+    NonnullRefPtr<NamespaceDeclaration const> parse_namespace_declaration(ASTNode const& parent, RefPtr<Comment const>, bool is_nested_namespace = false);
     Vector<NonnullRefPtr<Declaration const>> parse_declarations_in_translation_unit(ASTNode const& parent);
-    RefPtr<Declaration const> parse_single_declaration_in_translation_unit(ASTNode const& parent);
+    RefPtr<Statement const> parse_in_translation_unit(ASTNode const& parent);
     Vector<NonnullRefPtr<Type const>> parse_template_arguments(ASTNode const& parent);
     NonnullRefPtr<Name const> parse_name(ASTNode const& parent);
     NonnullRefPtr<CppCastExpression const> parse_cpp_cast_expression(ASTNode const& parent);
@@ -121,7 +122,7 @@ private:
     Vector<NonnullRefPtr<Declaration const>> parse_class_members(StructOrClassDeclaration& parent);
     NonnullRefPtr<Constructor const> parse_constructor(ASTNode const& parent);
     NonnullRefPtr<Destructor const> parse_destructor(ASTNode const& parent);
-    NonnullRefPtr<UsingNamespaceDeclaration const> parse_using_namespace_declaration(ASTNode const& parent);
+    NonnullRefPtr<UsingNamespaceDeclaration const> parse_using_namespace_declaration(ASTNode const& parent, RefPtr<Comment const>);
 
     bool match(Token::Type);
     Token consume(Token::Type);

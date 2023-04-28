@@ -26,6 +26,12 @@ static bool s_some_test_failed = false;
         return;           \
     } while (0)
 
+#define FAIL_ONLY                  \
+    do {                           \
+        s_some_test_failed = true; \
+        return;                    \
+    } while (0)
+
 #define FAIL(reason)                   \
     do {                               \
         printf("FAIL: " #reason "\n"); \
@@ -72,6 +78,7 @@ static void test_find_array_variable_declaration_single_empty();
 static void test_find_array_variable_declaration_double();
 static void test_complete_includes();
 static void test_parameters_hint();
+static void test_comments();
 
 int run_tests()
 {
@@ -84,6 +91,7 @@ int run_tests()
     RUN(test_find_array_variable_declaration_double());
     RUN(test_complete_includes());
     RUN(test_parameters_hint());
+    RUN(test_comments());
     return 0;
 }
 
@@ -262,6 +270,58 @@ void test_parameters_hint()
         FAIL("failed to get parameters hint (3)");
     if (result->params != Vector<DeprecatedString> { "int x", "char y" } || result->current_index != 0)
         FAIL("bad result (3)");
+
+    PASS;
+}
+
+void test_comments()
+{
+    I_TEST(Comments);
+    FileDB filedb;
+    filedb.set_project_root(TESTS_ROOT_DIR);
+    add_file(filedb, "comments.cpp");
+    CodeComprehension::Cpp::CppComprehensionEngine engine(filedb);
+
+    auto test_single_comment = [&](GUI::TextPosition position, StringView expected_comment) {
+        auto maybe_comment = engine.get_comment("comments.cpp"sv, position);
+        if (!maybe_comment.has_value()) {
+            outln("Comment: [{}] not found", expected_comment);
+            return false;
+        }
+        if (maybe_comment.value() != expected_comment) {
+            outln("Expected comment {}, got {}", expected_comment, maybe_comment.value());
+            return false;
+        }
+        return true;
+    };
+
+    if (!test_single_comment({ 18, 4 }, "// struct"sv)) {
+        FAIL_ONLY;
+    }
+
+    if (!test_single_comment({ 23, 4 }, "// function"sv)) {
+        FAIL_ONLY;
+    }
+
+    if (!test_single_comment({ 20, 4 }, "// bar struct"sv)) {
+        FAIL_ONLY;
+    }
+
+    if (!test_single_comment({ 27, 4 }, "// var declaration"sv)) {
+        FAIL_ONLY;
+    }
+
+    if (!test_single_comment({ 32, 8 }, "// inside if"sv)) {
+        FAIL_ONLY;
+    }
+
+    if (!test_single_comment({ 36, 8 }, "// inside else"sv)) {
+        FAIL_ONLY;
+    }
+
+    if (!test_single_comment({ 42, 8 }, "// inside for"sv)) {
+        FAIL_ONLY;
+    }
 
     PASS;
 }
